@@ -3,6 +3,7 @@
 WG_DIR="${WG_DIR:-/opt/homebrew/etc/wireguard}"
 WG_RUN_DIR="${WG_RUN_DIR:-/var/run/wireguard}"
 WG_QUICK="${WG_QUICK:-/opt/homebrew/bin/wg-quick}"
+WG_DIR="${WG_DIR/#\~/$HOME}"
 
 shopt -s nullglob
 confs=("$WG_DIR"/*.conf)
@@ -38,19 +39,19 @@ for i in "${!tunnels[@]}"; do
   name="${tunnels[i]}"
   key=$((i + 1))
   if is_active "$name"; then
-    VAR+=("● $name  (disconnect)" "$key" "run-shell -b 'sudo $WG_QUICK down $name'")
+    VAR+=("● $name  (disconnect)" "$key" "run-shell -b 'sudo $WG_QUICK down $WG_DIR/$name.conf'")
   elif [ ${#active[@]} -gt 0 ]; then
     current="${active[0]}"
-    VAR+=("  $name" "$key" "run-shell -b 'sudo $WG_QUICK down $current && sudo $WG_QUICK up $name'")
+    VAR+=("  $name" "$key" "run-shell -b 'sudo $WG_QUICK down $WG_DIR/$current.conf && sudo $WG_QUICK up $WG_DIR/$name.conf'")
   else
-    VAR+=("  $name" "$key" "run-shell -b 'sudo $WG_QUICK up $name'")
+    VAR+=("  $name" "$key" "run-shell -b 'sudo $WG_QUICK up $WG_DIR/$name.conf'")
   fi
 done
 
 if [ ${#active[@]} -gt 0 ]; then
   header="Active: $(IFS=,; echo "${active[*]}")"
   disconnect_cmd="run-shell -b '"
-  for a in "${active[@]}"; do disconnect_cmd+="sudo $WG_QUICK down $a; "; done
+  for a in "${active[@]}"; do disconnect_cmd+="sudo $WG_QUICK down $WG_DIR/$a.conf; "; done
   disconnect_cmd+="true'"
   disconnect_item=("Disconnect all" "d" "$disconnect_cmd")
 else
