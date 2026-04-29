@@ -46,11 +46,13 @@ fi
 # Wrap an inner command in a tmux menu action: echo the command to tmux's
 # status line, then run it privileged. The status echo previews what's about
 # to be authenticated since the system auth dialog can't be customised.
+# Output is silenced so wg-quick's progress lines don't pop a tmux output
+# window; failures still surface as a "returned <code>" status message.
 menu_action() {
   local inner="$1" disp="$1"
   disp="${disp//\\/\\\\}"; disp="${disp//\"/\\\"}"
   disp="${disp//\$/\\\$}"; disp="${disp//\`/\\\`}"
-  printf "run-shell -b 'tmux display-message \"%s\"; %s'" "$disp" "$(priv "$inner")"
+  printf "run-shell -b 'tmux display-message \"%s\"; %s >/dev/null 2>&1'" "$disp" "$(priv "$inner")"
 }
 
 shopt -s nullglob
