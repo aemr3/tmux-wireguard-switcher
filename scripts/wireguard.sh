@@ -7,14 +7,20 @@ WG_DIR="${WG_DIR/#\~/$HOME}"
 
 # Tmux popups have no TTY, so sudo's password prompt would hang. Two paths
 # work without a TTY: Touch ID via pam_tid (if configured), or osascript's
-# GUI auth dialog. Detect which by looking for pam_tid in sudo's PAM stack.
+# GUI auth dialog. Pick sudo only if all three are true:
+#   1. pam_tid.so is in sudo's PAM stack
+#   2. pam_reattach.so is too (so the Touch ID prompt surfaces from tmux's
+#      launchd namespace)
+#   3. at least one fingerprint is enrolled (otherwise pam_tid always fails
+#      and sudo falls through to password — which dies without a TTY)
+# Anything else falls back to osascript.
 has_touchid_sudo() {
-  local f
-  for f in /etc/pam.d/sudo_local /etc/pam.d/sudo; do
-    [ -r "$f" ] || continue
-    grep -qE '^[[:space:]]*[^#[:space:]].*pam_tid\.so' "$f" && return 0
-  done
-  return 1
+  local pam
+  pam=$(cat /etc/pam.d/sudo_local /etc/pam.d/sudo 2>/dev/null)
+  [ -n "$pam" ] || return 1
+  grep -qE '^[[:space:]]*[^#[:space:]].*pam_reattach\.so' <<<"$pam" || return 1
+  grep -qE '^[[:space:]]*[^#[:space:]].*pam_tid\.so'      <<<"$pam" || return 1
+  bioutil -c 2>/dev/null | grep -qE '^User [0-9]+:[[:space:]]*[1-9]'
 }
 
 # priv "<shell command>" prints a shell command that runs the inner command
