@@ -10,26 +10,35 @@ macOS + Homebrew + `wireguard-tools` + nerd-font terminal.
 ### 1. Required packages
 
 ```sh
-brew install wireguard-tools pam-reattach
+brew install wireguard-tools
 ```
 
-### 2. Touch ID for `sudo` (required — see "Why" below)
+### 2. Privilege escalation
 
-Create `/etc/pam.d/sudo_local` with:
+The popup runs `wg-quick up/down`, which needs root. Tmux popups have no
+TTY, so plain `sudo` would hang on the password prompt. The plugin auto-
+detects which TTY-less path to use:
+
+- **Touch ID via sudo** if `pam_tid.so` is in your sudo PAM stack. Pops the
+  Touch ID sheet (or strip on Magic Keyboards). Recommended for laptops.
+- **macOS auth dialog** otherwise. Pops the system "<app> wants to make
+  changes" dialog. Works on any Mac, including Mac minis without Touch ID.
+
+To opt into the Touch ID path, install `pam-reattach` and create
+`/etc/pam.d/sudo_local`:
+
+```sh
+brew install pam-reattach
+```
 
 ```
 auth       optional     /opt/homebrew/lib/pam/pam_reattach.so
 auth       sufficient   pam_tid.so
 ```
 
-Then any `sudo` from tmux pops a Touch ID sheet. On remote sessions
-(SSH / RealVNC) this falls through to a normal password prompt.
-
-**Why:** the popup runs `sudo wg-quick up/down`. Popup commands have no TTY,
-so `sudo` can't ask for a password there. Touch ID is UI-based and works
-without a TTY. `pam_reattach` is needed so the Touch ID prompt can surface
-from inside tmux (tmux processes run in a different launchd bootstrap
-namespace by default).
+`pam_reattach` is needed so the Touch ID prompt can surface from inside
+tmux (tmux processes run in a different launchd bootstrap namespace by
+default). The osascript fallback doesn't need `pam-reattach`.
 
 ### 3. Tunnel configs
 
