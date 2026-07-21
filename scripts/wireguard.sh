@@ -55,6 +55,18 @@ menu_action() {
   printf "run-shell -b 'tmux display-message \"%s\"; %s >/dev/null 2>&1'" "$disp" "$(priv "$inner")"
 }
 
+# Normal wg-quick down if the interface is live; if it's already gone (tunnel
+# dropped on its own, .name left behind) just clear the stale .name file so it
+# can't wedge disconnect or block a switch.
+wg_down() {
+  printf 'if ifconfig "$(cat %s/%s.name 2>/dev/null)" >/dev/null 2>&1; then %s down %s; else rm -f %s/%s.name; fi' \
+    "$WG_RUN_DIR" "$1" "$WG_QUICK" "$WG_DIR/$1.conf" "$WG_RUN_DIR" "$1"
+}
+
+wg_up() {
+  printf '%s up %s' "$WG_QUICK" "$WG_DIR/$1.conf"
+}
+
 shopt -s nullglob
 confs=("$WG_DIR"/*.conf)
 shopt -u nullglob
@@ -89,19 +101,19 @@ for i in "${!tunnels[@]}"; do
   name="${tunnels[i]}"
   key=$((i + 1))
   if is_active "$name"; then
-    VAR+=("● $name  (disconnect)" "$key" "$(menu_action "$WG_QUICK down $WG_DIR/$name.conf")")
+    VAR+=("● $name  (disconnect)" "$key" "$(menu_action "$(wg_down "$name")")")
   elif [ ${#active[@]} -gt 0 ]; then
     current="${active[0]}"
-    VAR+=("  $name" "$key" "$(menu_action "$WG_QUICK down $WG_DIR/$current.conf && $WG_QUICK up $WG_DIR/$name.conf")")
+    VAR+=("  $name" "$key" "$(menu_action "$(wg_down "$current"); $(wg_up "$name")")")
   else
-    VAR+=("  $name" "$key" "$(menu_action "$WG_QUICK up $WG_DIR/$name.conf")")
+    VAR+=("  $name" "$key" "$(menu_action "$(wg_up "$name")")")
   fi
 done
 
 if [ ${#active[@]} -gt 0 ]; then
   header="Active: $(IFS=,; echo "${active[*]}")"
   inner=""
-  for a in "${active[@]}"; do inner+="$WG_QUICK down $WG_DIR/$a.conf; "; done
+  for a in "${active[@]}"; do inner+="$(wg_down "$a"); "; done
   inner+="true"
   disconnect_item=("Disconnect all" "d" "$(menu_action "$inner")")
 else
