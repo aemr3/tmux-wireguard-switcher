@@ -32,6 +32,11 @@ WG_LOG_LEVEL="${WG_LOG_LEVEL:-debug}"
 PLIST_DIR="${WG_PLIST_DIR:-$WG_RUN_DIR/tmux-wireguard-switcher}"
 LABEL_PREFIX="com.aemr3.tmux-wireguard-switcher"
 
+# launchd jobs get a minimal PATH, but wg-quick's `#!/usr/bin/env bash` needs
+# Homebrew's bash 4+ and it shells out to wg/wireguard-go — all in the same
+# dir as wg-quick. Put that dir first so the job resolves them.
+WG_BINDIR="$(dirname "$WG_QUICK")"
+
 cmd="${1:-}"
 tunnel="${2:-}"
 if [ -z "$cmd" ] || [ -z "$tunnel" ]; then
@@ -85,6 +90,7 @@ case "$cmd" in
   <key>ThrottleInterval</key><integer>10</integer>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>PATH</key><string>$WG_BINDIR:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>WG_DIR</key><string>$WG_DIR</string>
     <key>WG_QUICK</key><string>$WG_QUICK</string>
     <key>WG_RUN_DIR</key><string>$WG_RUN_DIR</string>
