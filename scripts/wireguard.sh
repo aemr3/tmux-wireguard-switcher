@@ -3,7 +3,11 @@
 WG_DIR="${WG_DIR:-/opt/homebrew/etc/wireguard}"
 WG_RUN_DIR="${WG_RUN_DIR:-/var/run/wireguard}"
 WG_QUICK="${WG_QUICK:-/opt/homebrew/bin/wg-quick}"
+WG_LOG_DIR="${WG_LOG_DIR:-/var/log/tmux-wireguard-switcher}"
+WG_LOG_LEVEL="${WG_LOG_LEVEL:-debug}"
 WG_DIR="${WG_DIR/#\~/$HOME}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Tmux popups have no TTY, so sudo's password prompt would hang. Two paths
 # work without a TTY: Touch ID via pam_tid (if configured), or osascript's
@@ -24,8 +28,13 @@ has_touchid_sudo() {
 }
 
 # priv "<shell command>" prints a shell command that runs the inner command
-# as root with a single auth event.
+# as root with a single auth event. PRIV_METHOD records which path we took:
+# the osascript path routes tunnels through launchd (see wg_up/wg_down) to
+# survive authtrampoline's idle-reap; the sudo path is unaffected and runs
+# wg-quick directly.
+PRIV_METHOD="osascript"
 if has_touchid_sudo; then
+  PRIV_METHOD="sudo"
   priv() {
     local s="$1"
     s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
@@ -55,16 +64,33 @@ menu_action() {
   printf "run-shell -b 'tmux display-message \"%s\"; %s >/dev/null 2>&1'" "$disp" "$(priv "$inner")"
 }
 
+# On the osascript path, hand tunnel up/down to the launchd helper (which runs
+# wg-quick under a launchd job so authtrampoline's idle-reap can't kill it).
+# The helper needs the resolved paths, but osascript runs as root with root's
+# environment, so pass them explicitly rather than relying on inheritance.
+wg_launchd() {
+  printf 'WG_DIR=%s WG_QUICK=%s WG_RUN_DIR=%s WG_LOG_DIR=%s WG_LOG_LEVEL=%s /bin/sh %s/wg-launchd.sh %s %s' \
+    "$WG_DIR" "$WG_QUICK" "$WG_RUN_DIR" "$WG_LOG_DIR" "$WG_LOG_LEVEL" "$SCRIPT_DIR" "$1" "$2"
+}
+
 # Normal wg-quick down if the interface is live; if it's already gone (tunnel
 # dropped on its own, .name left behind) just clear the stale .name file so it
 # can't wedge disconnect or block a switch.
 wg_down() {
-  printf 'if ifconfig "$(cat %s/%s.name 2>/dev/null)" >/dev/null 2>&1; then %s down %s; else rm -f %s/%s.name; fi' \
-    "$WG_RUN_DIR" "$1" "$WG_QUICK" "$WG_DIR/$1.conf" "$WG_RUN_DIR" "$1"
+  if [ "$PRIV_METHOD" = osascript ]; then
+    wg_launchd down "$1"
+  else
+    printf 'if ifconfig "$(cat %s/%s.name 2>/dev/null)" >/dev/null 2>&1; then %s down %s; else rm -f %s/%s.name; fi' \
+      "$WG_RUN_DIR" "$1" "$WG_QUICK" "$WG_DIR/$1.conf" "$WG_RUN_DIR" "$1"
+  fi
 }
 
 wg_up() {
-  printf '%s up %s' "$WG_QUICK" "$WG_DIR/$1.conf"
+  if [ "$PRIV_METHOD" = osascript ]; then
+    wg_launchd up "$1"
+  else
+    printf '%s up %s' "$WG_QUICK" "$WG_DIR/$1.conf"
+  fi
 }
 
 shopt -s nullglob
