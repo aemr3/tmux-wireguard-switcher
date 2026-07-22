@@ -52,6 +52,18 @@ case "$self" in
   *) self="$(cd "$(dirname "$self")" && pwd)/$(basename "$self")" ;;
 esac
 
+# `launchctl bootout` returns before teardown finishes, so poll until the job
+# is actually gone before we bootstrap over it or tear the tunnel down (a stale
+# job with KeepAlive would otherwise re-up mid-teardown). Bounded (~5s) rather
+# than `bootout --wait`, which the man page warns can block indefinitely.
+wait_gone() {
+  i=0
+  while launchctl print "system/$1" >/dev/null 2>&1 && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+}
+
 case "$cmd" in
   up)
     mkdir -p "$WG_LOG_DIR" "$PLIST_DIR"
@@ -88,21 +100,28 @@ EOF
     chmod 644 "$plist"
     # Clear any prior instance so bootstrap can't fail on an existing label.
     launchctl bootout "system/$label" 2>/dev/null || true
+    wait_gone "$label"
     launchctl bootstrap system "$plist"
     ;;
 
   down)
-    # Remove the job first so KeepAlive can't re-up the tunnel mid-teardown.
+    # Remove the job first, and wait for it to actually go, so KeepAlive can't
+    # re-up the tunnel mid-teardown.
     launchctl bootout "system/$label" 2>/dev/null || true
+    wait_gone "$label"
+    status=0
     iface="$(cat "$name_file" 2>/dev/null || true)"
     if [ -n "$iface" ] && ifconfig "$iface" >/dev/null 2>&1; then
-      "$WG_QUICK" down "$conf" >>"$log" 2>&1
+      # Report a failed teardown rather than deleting the plist and claiming
+      # success over a tunnel that may still be up.
+      "$WG_QUICK" down "$conf" >>"$log" 2>&1 || status=$?
     else
       # Interface already gone (dropped on its own) — just clear the stale
       # .name so it can't wedge a later disconnect or block a switch.
       rm -f "$name_file"
     fi
     rm -f "$plist"
+    exit "$status"
     ;;
 
   supervise)
