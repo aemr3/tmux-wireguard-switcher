@@ -82,6 +82,8 @@ Prints `󰖂 <tunnel>` when a tunnel is up, nothing otherwise.
 | `WG_DIR` | `/opt/homebrew/etc/wireguard` |
 | `WG_RUN_DIR` | `/var/run/wireguard` |
 | `WG_QUICK` | `/opt/homebrew/bin/wg-quick` |
+| `WG_LOG_DIR` | `/var/log/tmux-wireguard-switcher` (osascript path only) |
+| `WG_LOG_LEVEL` | `debug` (passed to `wireguard-go` on the osascript path) |
 | `WG_STATUS_ICON` | `󰖂` (nerd-font `nf-md-vpn`) |
 
 ## How detection works
@@ -89,3 +91,21 @@ Prints `󰖂 <tunnel>` when a tunnel is up, nothing otherwise.
 `wg-quick` creates `/var/run/wireguard/<tunnel>.name` files when a tunnel is
 up. That directory is world-readable, so listing filenames tells us which
 tunnels are active — no sudo, no `wg show` on the polling path.
+
+## Why the osascript path uses launchd
+
+On Macs without Touch ID sudo the plugin authenticates with osascript's
+"administrator privileges" dialog, which runs commands through the temporary
+system helper `com.apple.security.authtrampoline`. Any process spawned down
+that chain — including `wireguard-go` — inherits the helper's jetsam
+coalition. macOS idle-reaps `authtrampoline` after a few minutes, and the
+coalition teardown takes `wireguard-go` with it: the interface detaches,
+routes vanish, and the tunnel dies while its `.name` file lingers. A process's
+coalition is fixed at spawn and can't be changed by `setsid`/`nohup`/`disown`,
+so `scripts/wg-launchd.sh` uses the auth event only to `launchctl bootstrap` a
+launchd job. `launchd` then owns the tunnel in its own coalition, immune to
+`authtrampoline`'s reap, and `KeepAlive` re-establishes it if it ever dies for
+another reason. Jobs are bootstrapped from a runtime dir (not
+`/Library/LaunchDaemons`), so they're session-only — a reboot clears them and
+nothing auto-connects at startup. The sudo (Touch ID) path is unaffected and
+still runs `wg-quick` directly.
